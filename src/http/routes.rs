@@ -74,35 +74,37 @@ async fn stream(
     // Select the appropriate agent based on the chain parameter and preamble
     let agent = match request.chain.as_deref() {
         #[cfg(feature = "solana")]
-        Some("solana") => match create_solana_agent(preamble).await {
-            Ok(agent) => Arc::new(agent),
-            Err(e) => {
-                let error_event = sse::Event::Data(sse::Data::new(
-                    serde_json::to_string(&StreamResponse::Error(format!(
-                        "Failed to create Solana agent: {}",
-                        e
-                    )))
-                    .unwrap(),
-                ));
-                let _ = tx.send(error_event).await;
-                return sse::Sse::from_infallible_receiver(rx);
+        Some("solana") => {
+            match crate::solana::agent::create_solana_agent(preamble).await {
+                Ok(agent) => Arc::new(agent),
+                Err(e) => {
+                    let error_event = sse::Event::Data(sse::Data::new(
+                        serde_json::to_string(&StreamResponse::Error(
+                            format!("Failed to create Solana agent: {}", e),
+                        ))
+                        .unwrap(),
+                    ));
+                    let _ = tx.send(error_event).await;
+                    return sse::Sse::from_infallible_receiver(rx);
+                }
             }
-        },
+        }
         #[cfg(feature = "evm")]
-        Some("evm") => match create_evm_agent(preamble).await {
-            Ok(agent) => Arc::new(agent),
-            Err(e) => {
-                let error_event = sse::Event::Data(sse::Data::new(
-                    serde_json::to_string(&StreamResponse::Error(format!(
-                        "Failed to create EVM agent: {}",
-                        e
-                    )))
-                    .unwrap(),
-                ));
-                let _ = tx.send(error_event).await;
-                return sse::Sse::from_infallible_receiver(rx);
+        Some("evm") => {
+            match crate::evm::agent::create_evm_agent(preamble).await {
+                Ok(agent) => Arc::new(agent),
+                Err(e) => {
+                    let error_event = sse::Event::Data(sse::Data::new(
+                        serde_json::to_string(&StreamResponse::Error(
+                            format!("Failed to create EVM agent: {}", e),
+                        ))
+                        .unwrap(),
+                    ));
+                    let _ = tx.send(error_event).await;
+                    return sse::Sse::from_infallible_receiver(rx);
+                }
             }
-        },
+        }
         Some("omni") => match create_cross_chain_agent(preamble).await {
             Ok(agent) => Arc::new(agent),
             Err(e) => {
