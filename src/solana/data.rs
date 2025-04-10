@@ -145,6 +145,7 @@ pub async fn holdings_to_portfolio(
 
 #[cfg(test)]
 mod tests {
+    use solana_sdk::pubkey::Pubkey;
     use solana_sdk::signer::Signer;
 
     use super::*;
@@ -161,5 +162,41 @@ mod tests {
         .unwrap();
 
         holdings_to_portfolio(holdings).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_holdings_to_portfolio_with_non_existing_token() {
+        let holdings = vec![
+            Holding {
+                mint: "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7"
+                    .to_string(), // Drift
+                ata: "omit".to_string(),
+                amount: 10,
+            },
+            Holding {
+                mint: Pubkey::new_unique().to_string(), // non existing
+                ata: "omit".to_string(),
+                amount: 10,
+            },
+            Holding {
+                mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh"
+                    .to_string(), // WBTC
+                ata: "omit".to_string(),
+                amount: 10,
+            },
+        ];
+
+        let portfolio = holdings_to_portfolio(holdings).await.unwrap();
+        assert_eq!(portfolio.len(), 2);
+        assert_eq!(
+            portfolio[0].address,
+            "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7".to_string()
+        );
+        assert_eq!(portfolio[0].name, "Drift".to_string());
+        assert_eq!(
+            portfolio[1].address,
+            "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh".to_string()
+        );
+        assert_eq!(portfolio[1].name, "Wrapped BTC (Portal)".to_string());
     }
 }
