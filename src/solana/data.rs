@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use futures::future::join_all;
 use reqwest::Client;
@@ -67,7 +69,7 @@ pub async fn holdings_to_portfolio(
 ) -> Result<Vec<PortfolioItem>> {
     let client = Client::new();
 
-    // Fetch metadata for all tokens
+    // Fetch metadata concurrently for all tokens.
     let metadata_futures: Vec<_> = holdings
         .iter()
         .map(|holding| {
@@ -81,46 +83,59 @@ pub async fn holdings_to_portfolio(
         .collect();
 
     let metadata_results = join_all(metadata_futures).await;
-    let token_metadata: Vec<TokenMetadata> = metadata_results
+
+    // Build a map keyed by the token's address.
+    let token_metadata_map: HashMap<String, TokenMetadata> = metadata_results
         .into_iter()
         .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .map(|metadata| (metadata.address.clone(), metadata))
+        .collect();
 
-    // Fetch prices for all tokens
+    // Fetch price data for all tokens.
     let mints: Vec<_> = holdings.iter().map(|h| h.mint.as_str()).collect();
     let prices_url =
         format!("https://api.jup.ag/price/v2?ids={}", mints.join(","));
     let price_response: PriceResponse =
         client.get(&prices_url).send().await?.json().await?;
 
-    // Combine all data into portfolio items
+    // Construct portfolio items by matching holdings with metadata.
     let portfolio: Vec<PortfolioItem> = holdings
         .iter()
-        .zip(token_metadata.iter())
-        .map(|(holding, metadata)| {
-            let price = price_response
-                .data
-                .get(&holding.mint)
-                .map(|p| match p {
-                    Some(price_data) => {
-                        price_data.price.parse::<f64>().unwrap_or(0.0)
-                    }
-                    None => 0.0,
+        .filter_map(|holding| {
+            // Look up metadata using the mint as key.
+            if let Some(metadata) =
+                token_metadata_map.get(&holding.mint.to_string())
+            {
+                let price = price_response
+                    .data
+                    .get(&holding.mint)
+                    .map(|p| match p {
+                        Some(price_data) => {
+                            price_data.price.parse::<f64>().unwrap_or(0.0)
+                        }
+                        None => 0.0,
+                    })
+                    .unwrap_or(0.0);
+
+                let amount = holding.amount as f64
+                    / (10f64.powi(metadata.decimals as i32));
+
+                Some(PortfolioItem {
+                    address: metadata.address.clone(),
+                    name: metadata.name.clone(),
+                    symbol: metadata.symbol.clone(),
+                    decimals: metadata.decimals,
+                    logo_uri: metadata.logo_uri.clone(),
+                    price,
+                    amount,
+                    daily_volume: metadata.volume_24h.unwrap_or(0.0),
                 })
-                .unwrap_or(0.0);
-
-            let amount = holding.amount as f64
-                / (10f64.powi(metadata.decimals as i32));
-
-            PortfolioItem {
-                address: metadata.address.clone(),
-                name: metadata.name.clone(),
-                symbol: metadata.symbol.clone(),
-                decimals: metadata.decimals,
-                logo_uri: metadata.logo_uri.clone(),
-                price,
-                amount,
-                daily_volume: metadata.volume_24h.unwrap_or(0.0),
+            } else {
+                eprintln!(
+                    "Missing metadata for holding with mint: {}",
+                    holding.mint
+                );
+                None
             }
         })
         .collect();
